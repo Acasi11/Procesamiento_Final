@@ -1,0 +1,76 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Del calor a los píxeles · Laboratorio Fourier</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6f5ef;color:#172d30;font:16px/1.42 "Segoe UI",Arial,sans-serif}
+main{max-width:1190px;margin:auto;padding:20px 30px}header,.controls,.head,.legend{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+header{border-bottom:1px solid #b7c3ba;padding-bottom:12px}h1{font:600 clamp(25px,3vw,42px)/1.05 Georgia,serif;margin:0}header small{display:block;font-weight:650;color:#466261;margin-bottom:5px}
+button,select{font:inherit;color:inherit;border:1px solid #859994;border-radius:5px;background:white;padding:7px 10px;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #cd781e}.controls{justify-content:flex-start;margin:15px 0}
+.controls label{display:flex;align-items:center;gap:8px;font-weight:600}.controls span{margin-left:auto;color:#49615e}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}figure,.plot{margin:0;background:white;border:1px solid #cbd1c9;border-radius:8px;overflow:hidden}
+figcaption{padding:8px 12px;font-weight:650}canvas{display:block;background:#232a2b;width:100%;height:clamp(125px,29vh,265px);object-fit:contain;image-rendering:pixelated}
+.metric{padding:7px 12px;font-size:15px}.metric b{font-variant-numeric:tabular-nums}.plot{padding:12px 15px;margin-top:14px}h2{font:600 22px Georgia,serif;margin:0}.legend{gap:14px;justify-content:flex-start;font-size:14px}.legend i{display:inline-block;width:20px;border-top:3px solid;margin-right:5px;vertical-align:middle}.legend i.ref{border-top-style:dashed}
+#graph{width:100%;height:auto;max-height:190px;display:block}#note{font-size:15px;margin:3px 0}.foot{font-size:14px;color:#455d5b;margin:9px 0}
+@media(max-width:720px){main{padding:12px}.grid{gap:5px}figcaption,.metric{font-size:13px;padding:5px}.controls span{margin:0}.plot{padding:8px}canvas{height:auto}.head{gap:6px}}@media print{.controls,header button{display:none}canvas{height:170px}.plot{break-inside:avoid}}
+</style><main>
+<header><div><small>UAA · Procesamiento de imágenes</small><h1>Del calor a los píxeles</h1></div><button id="full">Pantalla completa</button></header>
+<section class="controls"><label>Ejemplo <select id="example"><option>Carta de franjas</option><option>Estrella radial</option><option>Retrato de Grace Hopper</option></select></label>
+<label>Regularización K <select id="k"><option>0.0001</option><option>0.001</option><option selected>0.01</option><option>0.1</option></select></label><span>256 × 256 px · Desenfoque σ = 2 px</span></section>
+<div class="grid"><figure><figcaption>Referencia limpia</figcaption><canvas width="256" height="256" id="ref"></canvas><div class="metric">Original conocido</div></figure>
+<figure><figcaption>Entrada borrosa</figcaption><canvas width="256" height="256" id="obs"></canvas><div class="metric">PSNR <b id="before"></b></div></figure>
+<figure><figcaption>Restaurada por FFT</figcaption><canvas width="256" height="256" id="res"></canvas><div class="metric">PSNR <b id="after"></b> · <b id="delta"></b></div></figure></div>
+<section class="plot"><div class="head"><h2>Perfil de intensidad</h2><div class="legend"><span><i class="ref" style="color:#283d57"></i>Referencia</span><span><i style="color:#af591b"></i>Entrada</span><span><i style="color:#167862"></i>Restaurada</span></div></div>
+<svg id="graph" viewBox="0 0 960 150" role="img" aria-label="Intensidad de gris según la columna para las tres imágenes"></svg><p id="note"></p></section>
+<p class="foot">FFT 2D → filtro H* / (|H|² + K) → FFT inversa. PSNR calculado contra la referencia de 8 bits. Ruido gaussiano σ = 0.01 en escala 0–1, semilla 42.</p>
+</main><script>
+/*FFT*/
+const cases=/*DATA*/;
+const el=id=>document.getElementById(id);
+const read=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const samples=cases.map(([ref,obs])=>[read(ref),read(obs)]);
+const profiles=[
+  [135,140,189,'Observa cuánto se separan los máximos y mínimos de las franjas.'],
+  [110,25,230,'Las cuñas se estrechan hacia el centro. Observa cuáles vuelven a distinguirse.'],
+  [125,45,220,'Compara los cambios de intensidad en los contornos y las transiciones suaves del rostro.']
+];
+function paint(id,values){
+  const ctx=el(id).getContext('2d'), image=ctx.createImageData(256,256);
+  values.forEach((v,i)=>{image.data.set([v,v,v,255],4*i)});
+  ctx.putImageData(image,0,0);
+}
+function psnr(ref,values){
+  let sum=0;
+  for(let i=0;i<ref.length;i++)sum+=(ref[i]-values[i])**2;
+  return 10*Math.log10(255**2*ref.length/sum);
+}
+function profile(series,config){
+  const [row,lo,hi,hint]=config;
+  const X=x=>62+862*(x-lo)/(hi-lo),Y=y=>109-85*y/255;
+  let svg='<g font-family="Segoe UI,Arial,sans-serif" font-size="14" fill="#344946"><text x="5" y="15">Gris</text>';
+  for(const v of [0,128,255]) svg+='<path stroke="#dce1dc" d="M62 '+Y(v)+'h862"/><text text-anchor="end" x="48" y="'+(Y(v)+4)+'">'+v+'</text>';
+  for(let i=0;i<6;i++){
+    const v=Math.round(lo+(hi-lo)*i/5);
+    svg+='<text text-anchor="middle" x="'+X(v)+'" y="128">'+v+'</text>';
+  }
+  svg+='<text text-anchor="middle" x="482" y="147">Columna (px)</text></g>';
+  series.forEach((s,i)=>{
+    let points=[];
+    for(let x=lo;x<=hi;x++)points.push(X(x).toFixed(1)+','+Y(s[row*256+x]).toFixed(1));
+    svg+='<polyline fill="none" stroke="'+['#283d57','#af591b','#167862'][i]+'" stroke-width="2.3" '+(i===0?'stroke-dasharray="6 3"':'')+' points="'+points.join(' ')+'"/>';
+  });
+  el('graph').innerHTML=svg;
+  el('note').textContent='Fila '+row+', columnas '+lo+'–'+hi+' · '+hint;
+}
+function update(){
+  const idx=el('example').selectedIndex,[ref,obs]=samples[idx];
+  const res=restaurar(obs,256,Number(el('k').value));
+  paint('ref',ref);paint('obs',obs);paint('res',res);
+  const a=psnr(ref,obs),b=psnr(ref,res);
+  el('before').textContent=a.toFixed(2)+' dB';el('after').textContent=b.toFixed(2)+' dB';
+  el('delta').textContent=(b>=a?'+':'')+(b-a).toFixed(2)+' dB';
+  profile([ref,obs,res],profiles[idx]);
+}
+el('example').onchange=el('k').onchange=update;
+el('full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch{el('full').textContent='Usa F11 para ampliar'}};
+document.onfullscreenchange=()=>el('full').textContent=document.fullscreenElement?'Salir de pantalla completa':'Pantalla completa';
+update();
+</script></html>
